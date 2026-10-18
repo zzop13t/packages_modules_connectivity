@@ -53,6 +53,7 @@ import android.text.TextUtils;
 import android.util.Log;
 import android.util.Pair;
 
+import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -381,7 +382,7 @@ public class DnsManager {
         paramsParcel.successThreshold = mSuccessThreshold;
         paramsParcel.minSamples = mMinSamples;
         paramsParcel.maxSamples = mMaxSamples;
-        paramsParcel.servers = makeStrings(lp.getDnsServers());
+        paramsParcel.servers = makeStrings(sortIpv4First(lp.getDnsServers()));
         paramsParcel.domains = getDomainStrings(lp.getDomains());
         paramsParcel.tlsName = strictMode ? privateDnsCfg.hostname : "";
         paramsParcel.tlsServers =
@@ -466,6 +467,36 @@ public class DnsManager {
 
     private int getIntSetting(String which, int dflt) {
         return Settings.Global.getInt(mContentResolver, which, dflt);
+    }
+
+    /**
+     * Orders DNS servers so that IPv4 servers are tried before IPv6 ones, keeping the relative
+     * order inside each address family.
+     *
+     * <p>IPClient builds {@link LinkProperties} by adding the servers learned from router
+     * advertisements (netlink, i.e. IPv6/RDNSS) first and the DHCPv4 ones afterwards, so on a
+     * dual-stack network the IPv6 servers always end up in front. The resolver uses the
+     * configured order when trying servers (the "sort_nameservers" experiment is off by
+     * default), which makes IPv6 DNS effectively preferred.
+     *
+     * <p>If the network only provides one family, the list is returned unchanged, so IPv6-only
+     * networks keep working.
+     */
+    private static List<InetAddress> sortIpv4First(List<InetAddress> servers) {
+        final List<InetAddress> v4 = new ArrayList<>(servers.size());
+        final List<InetAddress> others = new ArrayList<>(servers.size());
+        for (InetAddress addr : servers) {
+            if (addr instanceof Inet4Address) {
+                v4.add(addr);
+            } else {
+                others.add(addr);
+            }
+        }
+        if (v4.isEmpty() || others.isEmpty()) {
+            return servers;
+        }
+        v4.addAll(others);
+        return v4;
     }
 
     /**
